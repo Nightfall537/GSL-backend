@@ -1,17 +1,3 @@
-{
-  "BEER": 0,
-  "COUSIN": 1,
-  "FAMILY": 2,
-  "FATHER": 3,
-  "FRIEND": 4,
-  "FRUIT": 5,
-  "GROUP": 6,
-  "ME": 7,
-  "MINE": 8,
-  "MY": 9,
-  "NAME": 10,
-  "PARENT": 11,
-  "RABBIT": 12,
-  "RELATIONSHIP": 13,
-  "WIFE": 14
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:22ea332042b9da3169d44afd9d9bdc21a468a393f2acbeef9f5246d995d4c11c
+size 236
