@@ -1,0 +1,22 @@
+{
+  "gestures": [
+    "red",
+    "blue",
+    "green",
+    "yellow",
+    "black",
+    "white",
+    "orange",
+    "purple",
+    "pink",
+    "brown",
+    "gray"
+  ],
+  "num_classes": 11,
+  "model_file": "fullbody_gsl_model_20251108_055012.h5",
+  "validation_accuracy": 0.0,
+  "validation_loss": 3.2082114219665527,
+  "training_date": "20251108_055012",
+  "model_type": "full_body_holistic",
+  "features": "pose(33) + left_hand(21) + right_hand(21) + face(14) + spatial(6)"
+}

@@ -1,0 +1,17 @@
+{
+  "BEER": 0,
+  "COUSIN": 1,
+  "FAMILY": 2,
+  "FATHER": 3,
+  "FRIEND": 4,
+  "FRUIT": 5,
+  "GROUP": 6,
+  "ME": 7,
+  "MINE": 8,
+  "MY": 9,
+  "NAME": 10,
+  "PARENT": 11,
+  "RABBIT": 12,
+  "RELATIONSHIP": 13,
+  "WIFE": 14
+}

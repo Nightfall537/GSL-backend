@@ -1,0 +1,34 @@
+# GSL YouTube Video URLs
+# Add one URL per line
+# Format: URL | Category (optional)
+
+# Colors (already have this one)
+# https://www.youtube.com/watch?v=8VqKx-5gXRY | colors
+
+# Family Signs
+# Add family sign videos here
+
+# Food Signs  
+# Add food sign videos here
+
+# Animals
+# Add animal sign videos here
+
+# Numbers
+# Add number sign videos here
+
+# Greetings
+# Add greeting sign videos here
+
+# Grammar
+# Add grammar sign videos here
+
+# Home/Clothing
+# Add home/clothing sign videos here
+
+# Instructions:
+# 1. Search YouTube for "Ghana Sign Language" or "GSL"
+# 2. Find relevant videos
+# 3. Copy the URL
+# 4. Paste it above in the appropriate category
+# 5. Run: python download_gsl_youtube_videos.py
