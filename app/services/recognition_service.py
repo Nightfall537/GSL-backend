@@ -13,10 +13,10 @@ from sqlalchemy.orm import Session
 
 from app.config.settings import get_settings
 from app.db_models.gsl import GSLSign
-# Note: SignRecognition will be handled via Supabase
+from app.db_models.recognition import SignRecognition
 from app.schemas.gsl import (
-    RecognitionRequest, RecognitionResponse,
-    ConfidenceScore, SimilarGesture
+    SignRecognitionRequest, SignRecognitionResponse,
+    SimilarGesture, GSLSignResponse, RecognitionStatus
 )
 from app.ai.computer_vision import ComputerVisionModel
 from app.utils.cache import CacheManager
@@ -39,7 +39,7 @@ class RecognitionService:
         media_data: bytes,
         media_type: str,
         user_id: Optional[UUID] = None
-    ) -> RecognitionResponse:
+    ) -> SignRecognitionResponse:
         """
         Recognize GSL gesture from video or image data.
         
@@ -72,18 +72,33 @@ class RecognitionService:
                 recognized_sign_id=None,
                 confidence_score=top_prediction['confidence'] if top_prediction else 0.0,
                 processing_time=(datetime.utcnow() - start_time).total_seconds(),
-                status="low_confidence"
+                status="low_confidence",
+                media_type=media_type
             )
             self.db.add(recognition)
             self.db.commit()
             
-            return RecognitionResponse(
+            # Convert similar gestures to dict format
+            alternative_matches = [
+                {
+                    "sign": {
+                        "id": str(sg.sign.id),
+                        "sign_name": sg.sign.sign_name,
+                        "description": sg.sign.description
+                    } if sg.sign else None,
+                    "similarity_score": sg.similarity_score,
+                    "reason": sg.reason
+                }
+                for sg in similar_gestures
+            ]
+            
+            return SignRecognitionResponse(
                 recognition_id=recognition.id,
                 recognized_sign=None,
                 confidence_score=recognition.confidence_score,
-                alternative_matches=similar_gestures,
+                alternative_matches=alternative_matches,
                 processing_time=recognition.processing_time,
-                status="low_confidence",
+                status=RecognitionStatus.low_confidence,
                 message="Gesture not recognized with high confidence. See suggestions."
             )
         
@@ -91,7 +106,7 @@ class RecognitionService:
         sign = await self._get_sign_by_label(top_prediction['label'])
         
         # Get alternative matches
-        alternative_matches = await self._get_alternative_matches(predictions[1:5])
+        alternative_matches_raw = await self._get_alternative_matches(predictions[1:5])
         
         # Save recognition result
         recognition = SignRecognition(
@@ -100,18 +115,49 @@ class RecognitionService:
             recognized_sign_id=sign.id if sign else None,
             confidence_score=top_prediction['confidence'],
             processing_time=(datetime.utcnow() - start_time).total_seconds(),
-            status="success"
+            status="success",
+            media_type=media_type
         )
         self.db.add(recognition)
         self.db.commit()
         
-        return RecognitionResponse(
+        # Convert sign to response model
+        sign_response = None
+        if sign:
+            sign_response = GSLSignResponse(
+                id=sign.id,
+                sign_name=sign.sign_name,
+                description=sign.description,
+                category=sign.category.name if sign.category else "custom",
+                difficulty_level=sign.difficulty_level,
+                video_url=sign.video_url,
+                thumbnail_url=sign.thumbnail_url,
+                usage_examples=sign.usage_examples or [],
+                related_signs=sign.related_signs or [],
+                created_at=sign.created_at,
+                updated_at=sign.updated_at
+            )
+        
+        # Convert alternative matches to dict format
+        alternative_matches = [
+            {
+                "sign": {
+                    "id": str(alt_sign.id),
+                    "sign_name": alt_sign.sign_name,
+                    "description": alt_sign.description
+                } if alt_sign else None,
+                "confidence": conf
+            }
+            for alt_sign, conf in alternative_matches_raw
+        ]
+        
+        return SignRecognitionResponse(
             recognition_id=recognition.id,
-            recognized_sign=sign,
+            recognized_sign=sign_response,
             confidence_score=recognition.confidence_score,
             alternative_matches=alternative_matches,
             processing_time=recognition.processing_time,
-            status="success",
+            status=RecognitionStatus.success,
             message="Gesture recognized successfully"
         )
     
@@ -225,8 +271,21 @@ class RecognitionService:
         results = []
         for sign in similar_signs:
             similarity = self._calculate_similarity(target_sign, sign)
+            sign_response = GSLSignResponse(
+                id=sign.id,
+                sign_name=sign.sign_name,
+                description=sign.description,
+                category=sign.category.name if sign.category else "custom",
+                difficulty_level=sign.difficulty_level,
+                video_url=sign.video_url,
+                thumbnail_url=sign.thumbnail_url,
+                usage_examples=sign.usage_examples or [],
+                related_signs=sign.related_signs or [],
+                created_at=sign.created_at,
+                updated_at=sign.updated_at
+            )
             results.append(SimilarGesture(
-                sign=sign,
+                sign=sign_response,
                 similarity_score=similarity,
                 reason=f"Same category: {sign.category.name if sign.category else 'Unknown'}"
             ))
@@ -274,8 +333,21 @@ class RecognitionService:
         for pred in predictions[:self.max_similar_suggestions]:
             sign = await self._get_sign_by_label(pred['label'])
             if sign:
+                sign_response = GSLSignResponse(
+                    id=sign.id,
+                    sign_name=sign.sign_name,
+                    description=sign.description,
+                    category=sign.category.name if sign.category else "custom",
+                    difficulty_level=sign.difficulty_level,
+                    video_url=sign.video_url,
+                    thumbnail_url=sign.thumbnail_url,
+                    usage_examples=sign.usage_examples or [],
+                    related_signs=sign.related_signs or [],
+                    created_at=sign.created_at,
+                    updated_at=sign.updated_at
+                )
                 similar.append(SimilarGesture(
-                    sign=sign,
+                    sign=sign_response,
                     similarity_score=pred['confidence'],
                     reason="Possible match based on gesture features"
                 ))
@@ -283,7 +355,7 @@ class RecognitionService:
     
     async def _generate_validation_feedback(
         self,
-        recognition: RecognitionResponse,
+        recognition: SignRecognitionResponse,
         expected_sign_id: UUID,
         is_correct: bool
     ) -> str:

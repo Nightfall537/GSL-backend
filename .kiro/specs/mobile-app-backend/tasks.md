@@ -99,7 +99,7 @@
     -   Test caching strategies and offline synchronization
     -   _Requirements: 5.1, 5.2, 5.4_
 
--   [ ] 5. Create Sign Recognition Service with AI model integration
+-   [-] 5. Create Sign Recognition Service with AI model integration
 
     -   Implement video/image upload endpoints for gesture recognition
     -   Integrate TensorFlow Lite models for computer vision processing
@@ -107,7 +107,7 @@
     -   Add fallback handling for unrecognized gestures with similar sign suggestions
     -   _Requirements: 2.1, 2.2, 2.3, 2.5_
 
--   [ ] 5.1 Implement gesture validation and feedback system
+-   [x] 5.1 Implement gesture validation and feedback system
 
     -   Create endpoints for validating learner gesture attempts
     -   Implement confidence score analysis and feedback generation

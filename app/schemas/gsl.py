@@ -207,3 +207,10 @@ class BatchRecognitionResponse(BaseModel):
     successful_recognitions: int
     average_confidence: float
     processing_time: float
+
+
+class SimilarGesture(BaseModel):
+    """Schema for similar gesture suggestion."""
+    sign: GSLSignResponse
+    similarity_score: float = Field(..., ge=0.0, le=1.0, description="Similarity score")
+    reason: str = Field(..., description="Reason for similarity")
