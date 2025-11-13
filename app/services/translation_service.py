@@ -11,10 +11,11 @@ from sqlalchemy.orm import Session
 
 from app.config.settings import get_settings
 from app.db_models.gsl import GSLSign
-# Note: Translation will be handled via Supabase
+from app.db_models.translation import Translation, SignSequence
 from app.schemas.gsl import (
     SpeechToSignRequest, TextToSignRequest,
-    SignToTextRequest, TranslationResponse
+    SignToTextRequest, TranslationResponse, GSLSignResponse,
+    SignSequenceResponse
 )
 from app.ai.speech_to_text import SpeechToTextModel
 from app.ai.nlp_processor import NLPProcessor
@@ -183,7 +184,7 @@ class TranslationService:
             message="Translation successful"
         )
     
-    async def get_sign_video(self, sign_id: UUID) -> Optional[dict]:
+    async def get_sign_video(self, sign_id: UUID) -> Optional[GSLSignResponse]:
         """
         Get sign demonstration video.
         
@@ -193,21 +194,25 @@ class TranslationService:
         Returns:
             Sign video information
         """
+        # Check cache first
+        cache_key = f"sign_video:{sign_id}"
+        cached_sign = await self.cache.get(cache_key)
+        if cached_sign:
+            return cached_sign
+        
         sign = self.db.query(GSLSign).filter(GSLSign.id == sign_id).first()
         
         if not sign:
             return None
         
-        return {
-            "sign_id": sign.id,
-            "sign_name": sign.sign_name,
-            "video_url": sign.video_url,
-            "thumbnail_url": sign.thumbnail_url,
-            "description": sign.description,
-            "usage_examples": sign.usage_examples
-        }
+        sign_response = GSLSignResponse.from_orm(sign)
+        
+        # Cache the result
+        await self.cache.set(cache_key, sign_response, ttl=7200)
+        
+        return sign_response
     
-    async def get_sign_variations(self, sign_id: UUID) -> List[GSLSign]:
+    async def get_sign_variations(self, sign_id: UUID) -> List[GSLSignResponse]:
         """
         Get variations of a sign, prioritizing Harmonized GSL.
         
@@ -225,13 +230,105 @@ class TranslationService:
         # Get related signs
         variations = []
         if sign.related_signs:
-            variations = self.db.query(GSLSign).filter(
+            related = self.db.query(GSLSign).filter(
                 GSLSign.id.in_(sign.related_signs)
             ).all()
+            variations = [GSLSignResponse.from_orm(s) for s in related]
         
         # Sort by harmonized status (if we have that field)
         # Harmonized GSL versions should come first
+        # For now, return as-is
         return variations
+    
+    async def create_sign_sequence(
+        self,
+        text: str,
+        signs: List[GSLSign],
+        user_id: Optional[UUID] = None
+    ) -> SignSequenceResponse:
+        """
+        Create an animated sign sequence with timing and transitions.
+        
+        Args:
+            text: Original text
+            signs: List of GSL signs
+            user_id: Optional user ID
+            
+        Returns:
+            Sign sequence with timing information
+        """
+        if not signs:
+            return SignSequenceResponse(
+                original_text=text,
+                signs=[],
+                total_signs=0,
+                estimated_duration=0.0,
+                transitions=[],
+                grammar_applied=False
+            )
+        
+        # Calculate timing for each sign (average 2 seconds per sign)
+        sign_duration = 2.0
+        transition_duration = 0.5
+        
+        transitions = []
+        current_time = 0.0
+        
+        for i, sign in enumerate(signs):
+            transition = {
+                "sign_index": i,
+                "start_time": current_time,
+                "duration": sign_duration,
+                "transition_type": "smooth" if i > 0 else "none",
+                "transition_duration": transition_duration if i > 0 else 0.0
+            }
+            transitions.append(transition)
+            current_time += sign_duration + (transition_duration if i < len(signs) - 1 else 0)
+        
+        estimated_duration = current_time
+        
+        # Save sequence to database
+        sign_sequence = SignSequence(
+            original_text=text,
+            sign_ids=[str(sign.id) for sign in signs],
+            transitions=transitions,
+            estimated_duration=estimated_duration,
+            grammar_applied="harmonized_gsl"
+        )
+        self.db.add(sign_sequence)
+        self.db.commit()
+        self.db.refresh(sign_sequence)
+        
+        # Convert signs to response format
+        sign_responses = [GSLSignResponse.from_orm(sign) for sign in signs]
+        
+        return SignSequenceResponse(
+            original_text=text,
+            signs=sign_responses,
+            total_signs=len(signs),
+            estimated_duration=estimated_duration,
+            transitions=transitions,
+            grammar_applied=True
+        )
+    
+    async def get_multiple_sign_videos(
+        self,
+        sign_ids: List[UUID]
+    ) -> List[GSLSignResponse]:
+        """
+        Get multiple sign demonstration videos.
+        
+        Args:
+            sign_ids: List of GSL sign IDs
+            
+        Returns:
+            List of sign video information
+        """
+        signs = self.db.query(GSLSign).filter(
+            GSLSign.id.in_(sign_ids)
+        ).all()
+        
+        return [GSLSignResponse.from_orm(sign) for sign in signs]
     
     async def _map_keywords_to_signs(self, keywords: List[str]) -> List[GSLSign]:
         """Map extracted keywords to GSL signs."""

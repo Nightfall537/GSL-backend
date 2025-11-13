@@ -197,6 +197,42 @@ async def get_current_active_user(
     return current_user
 
 
+async def get_optional_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    """
+    Dependency to get current user if authenticated, None otherwise.
+    
+    Args:
+        credentials: Optional HTTP authorization credentials
+        db: Database session
+        
+    Returns:
+        Current authenticated user or None
+    """
+    if credentials is None:
+        return None
+    
+    try:
+        token = credentials.credentials
+        payload = SecurityManager.decode_token(token)
+        
+        if payload is None:
+            return None
+        
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            return None
+        
+        # Get user from database
+        user = db.query(User).filter(User.id == UUID(user_id)).first()
+        return user
+        
+    except (JWTError, ValueError):
+        return None
+
+
 def require_role(required_role: str):
     """
     Dependency factory for role-based access control.

@@ -121,7 +121,7 @@
     -   Test fallback handling for unrecognized gestures
     -   _Requirements: 2.1, 2.2, 2.3_
 
--   [ ] 6. Implement Translation Service for speech and text conversion
+-   [-] 6. Implement Translation Service for speech and text conversion
 
     -   Create speech-to-text endpoints using Whisper or similar models
     -   Implement text-to-sign translation using GSL dictionary mapping
@@ -129,7 +129,7 @@
     -   Create sign-to-text conversion for recognized gestures
     -   _Requirements: 3.1, 3.2, 3.4, 3.5_
 
--   [ ] 6.1 Add sign demonstration video retrieval
+-   [x] 6.1 Add sign demonstration video retrieval
 
     -   Implement endpoints for retrieving sign demonstration videos
     -   Create animated sequence generation for sign instructions
