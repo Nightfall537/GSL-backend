@@ -109,8 +109,10 @@ class CacheManager:
         """
         Delete value from cache.
         
+        Supports wildcard patterns (e.g., "user:*").
+        
         Args:
-            key: Cache key
+            key: Cache key or pattern
             
         Returns:
             True if successful
@@ -119,6 +121,10 @@ class CacheManager:
             redis = await self._get_redis()
             if redis is None:
                 return False
+            
+            # Check if key contains wildcard
+            if '*' in key or '?' in key:
+                return await self.clear_pattern(key) > 0
             
             await redis.delete(key)
             return True

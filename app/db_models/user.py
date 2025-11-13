@@ -66,6 +66,7 @@ class User(Base):
     # Relationships
     learning_progress = relationship("LearningProgress", back_populates="user", uselist=False)
     practice_sessions = relationship("PracticeSession", back_populates="user")
+    media_files = relationship("MediaFile", back_populates="user")
     
     def __repr__(self):
         return f"<User(id={self.id}, username={self.username}, email={self.email})>"

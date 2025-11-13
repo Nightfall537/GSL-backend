@@ -14,7 +14,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config.settings import get_settings
-# Note: MediaFile will be handled via Supabase
+from app.db_models.media import MediaFile, MediaType, ProcessingStatus
 from app.schemas.media import (
     MediaUploadResponse, MediaProcessingRequest,
     VideoStreamResponse

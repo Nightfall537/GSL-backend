@@ -1,213 +1,381 @@
 """
-Unit Tests for Media Service
+Tests for Media Service
 
-Tests file upload, compression, streaming, and processing.
+Tests file upload, video streaming, compression, caching,
+and offline synchronization functionality.
 """
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
-from uuid import UUID, uuid4
+from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from uuid import uuid4
 from pathlib import Path
+import tempfile
+import shutil
 
 from app.services.media_service import MediaService
+from app.db_models.media import MediaFile, MediaType, ProcessingStatus
+from app.schemas.media import MediaUploadResponse
 
 
-class TestMediaService:
-    """Test cases for MediaService."""
-    
-    @pytest.fixture
-    def media_service(self, test_db):
-        """Create MediaService instance."""
-        return MediaService(test_db)
+@pytest.fixture
+def temp_upload_dir():
+    """Create temporary upload directory."""
+    temp_dir = tempfile.mkdtemp()
+    yield Path(temp_dir)
+    shutil.rmtree(temp_dir)
+
+
+@pytest.fixture
+def mock_file_handler():
+    """Mock file handler."""
+    handler = Mock()
+    handler.save_file = AsyncMock(return_value=True)
+    handler.generate_thumbnail = AsyncMock(return_value=Path("/fake/thumb.jpg"))
+    handler.extract_video_frames = AsyncMock(return_value=[b"frame1", b"frame2"])
+    handler.compress_media = AsyncMock(return_value=b"compressed-data")
+    handler.compress_video = AsyncMock(return_value=True)
+    handler.extract_audio = AsyncMock(return_value=Path("/fake/audio.wav"))
+    return handler
+
+
+@pytest.fixture
+def mock_cache():
+    """Mock cache manager."""
+    cache = Mock()
+    cache.get = AsyncMock(return_value=None)
+    cache.set = AsyncMock(return_value=True)
+    cache.delete = AsyncMock(return_value=True)
+    cache.exists = AsyncMock(return_value=False)
+    return cache
+
+
+@pytest.fixture
+def media_service(test_db, temp_upload_dir, mock_file_handler, mock_cache):
+    """Create media service with mocked dependencies."""
+    service = MediaService(test_db)
+    service.upload_dir = temp_upload_dir
+    service.file_handler = mock_file_handler
+    service.cache = mock_cache
+    return service
+
+
+class TestMediaUpload:
+    """Test media file upload functionality."""
     
     @pytest.mark.asyncio
-    async def test_upload_media_success(
-        self,
-        media_service,
-        sample_video_bytes
-    ):
-        """Test successful media upload."""
-        filename = "test_video.mp4"
-        content_type = "video/mp4"
-        user_id = uuid4()
-        
-        with patch.object(media_service, '_validate_file'):
-            with patch.object(media_service.file_handler, 'save_file', return_value=True):
-                with patch.object(media_service.file_handler, 'generate_thumbnail', return_value=Path("thumb.jpg")):
-                    result = await media_service.upload_media(
-                        sample_video_bytes,
-                        filename,
-                        content_type,
-                        user_id
-                    )
-                    
-                    assert result.filename == filename
-                    assert result.content_type == content_type
-                    assert result.file_size == len(sample_video_bytes)
-    
-    @pytest.mark.asyncio
-    async def test_upload_media_duplicate(
-        self,
-        media_service,
-        sample_video_bytes
-    ):
-        """Test uploading duplicate file (deduplication)."""
-        filename = "test_video.mp4"
-        content_type = "video/mp4"
-        
-        # Mock existing file
-        existing_file = Mock(
-            id=uuid4(),
-            filename=filename,
-            file_url="https://example.com/video.mp4",
-            file_size=len(sample_video_bytes)
+    async def test_upload_video_success(self, media_service, test_db, sample_video_bytes):
+        """Test successful video upload."""
+        result = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="test_video.mp4",
+            content_type="video/mp4",
+            user_id=uuid4()
         )
         
-        with patch.object(media_service, '_validate_file'):
-            with patch.object(media_service, '_calculate_file_hash', return_value="hash123"):
-                media_service.db.query = Mock(return_value=Mock(
-                    filter=Mock(return_value=Mock(first=Mock(return_value=existing_file)))
-                ))
-                
-                result = await media_service.upload_media(
-                    sample_video_bytes,
-                    filename,
-                    content_type
-                )
-                
-                assert result.file_id == existing_file.id
-                assert "deduplicated" in result.message.lower()
+        assert isinstance(result, MediaUploadResponse)
+        assert result.filename == "test_video.mp4"
+        assert result.content_type == "video/mp4"
+        assert result.file_size == len(sample_video_bytes)
+        assert result.file_url is not None
+        assert "uploaded successfully" in result.message.lower()
     
     @pytest.mark.asyncio
-    async def test_get_video_stream(self, media_service):
-        """Test getting video for streaming."""
-        file_id = uuid4()
+    async def test_upload_image_success(self, media_service, sample_image_bytes):
+        """Test successful image upload."""
+        result = await media_service.upload_media(
+            file_data=sample_image_bytes,
+            filename="test_image.jpg",
+            content_type="image/jpeg",
+            user_id=uuid4()
+        )
         
-        mock_file = Mock(
-            id=file_id,
-            file_path="uploads/video.mp4",
+        assert isinstance(result, MediaUploadResponse)
+        assert result.filename == "test_image.jpg"
+        assert result.content_type == "image/jpeg"
+    
+    @pytest.mark.asyncio
+    async def test_upload_file_too_large(self, media_service):
+        """Test upload fails for oversized files."""
+        large_file = b"x" * (100 * 1024 * 1024)  # 100MB
+        
+        with pytest.raises(ValueError, match="exceeds maximum"):
+            await media_service.upload_media(
+                file_data=large_file,
+                filename="large.mp4",
+                content_type="video/mp4"
+            )
+    
+    @pytest.mark.asyncio
+    async def test_upload_invalid_file_type(self, media_service):
+        """Test upload fails for invalid file types."""
+        with pytest.raises(ValueError, match="not allowed"):
+            await media_service.upload_media(
+                file_data=b"test",
+                filename="test.exe",
+                content_type="application/x-msdownload"
+            )
+    
+    @pytest.mark.asyncio
+    async def test_upload_invalid_content_type(self, media_service):
+        """Test upload fails for unsupported content types."""
+        with pytest.raises(ValueError, match="not supported"):
+            await media_service.upload_media(
+                file_data=b"test",
+                filename="test.mp4",
+                content_type="application/octet-stream"
+            )
+    
+    @pytest.mark.asyncio
+    async def test_upload_deduplication(self, media_service, test_db, sample_video_bytes):
+        """Test file deduplication by hash."""
+        user_id = uuid4()
+        
+        # Upload first file
+        result1 = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="video1.mp4",
+            content_type="video/mp4",
+            user_id=user_id
+        )
+        
+        # Upload same file with different name
+        result2 = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="video2.mp4",
+            content_type="video/mp4",
+            user_id=user_id
+        )
+        
+        # Should return same file ID (deduplicated)
+        assert result1.file_id == result2.file_id
+        assert "already exists" in result2.message.lower()
+
+
+class TestVideoStreaming:
+    """Test video streaming functionality."""
+    
+    @pytest.mark.asyncio
+    async def test_get_video_stream_original(self, media_service, test_db, sample_video_bytes):
+        """Test getting original quality video stream."""
+        # Upload video first
+        upload_result = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="stream_test.mp4",
             content_type="video/mp4"
         )
         
-        media_service.db.query = Mock(return_value=Mock(
-            filter=Mock(return_value=Mock(first=Mock(return_value=mock_file)))
-        ))
-        
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('pathlib.Path.stat', return_value=Mock(st_size=1024)):
-                result = await media_service.get_video_stream(file_id)
-                
-                assert result is not None
-                assert result.file_id == file_id
-    
-    @pytest.mark.asyncio
-    async def test_get_compressed_media(
-        self,
-        media_service,
-        sample_video_bytes
-    ):
-        """Test getting compressed media."""
-        file_id = uuid4()
-        
-        mock_file = Mock(
-            id=file_id,
-            file_path="uploads/video.mp4"
+        # Get stream
+        stream_info = await media_service.get_video_stream(
+            upload_result.file_id,
+            quality="original"
         )
         
-        media_service.db.query = Mock(return_value=Mock(
-            filter=Mock(return_value=Mock(first=Mock(return_value=mock_file)))
-        ))
-        
-        with patch.object(media_service.cache, 'get', return_value=None):
-            with patch('pathlib.Path.exists', return_value=True):
-                with patch.object(media_service.file_handler, 'compress_media', return_value=sample_video_bytes):
-                    with patch.object(media_service.cache, 'set', return_value=True):
-                        result = await media_service.get_compressed_media(file_id)
-                        
-                        assert result is not None
+        assert stream_info is not None
+        assert stream_info.file_id == upload_result.file_id
+        assert stream_info.quality == "original"
+        assert stream_info.content_type == "video/mp4"
     
     @pytest.mark.asyncio
-    async def test_process_media_for_ai_gesture_recognition(
-        self,
-        media_service
-    ):
-        """Test processing media for gesture recognition."""
-        file_id = uuid4()
-        
-        mock_file = Mock(
-            id=file_id,
-            file_path="uploads/video.mp4"
+    async def test_get_video_stream_not_found(self, media_service):
+        """Test getting stream for non-existent video."""
+        result = await media_service.get_video_stream(uuid4())
+        assert result is None
+
+
+class TestMediaCompression:
+    """Test media compression functionality."""
+    
+    @pytest.mark.asyncio
+    async def test_compress_media_cached(self, media_service, test_db, sample_video_bytes):
+        """Test compressed media is cached."""
+        # Upload video
+        upload_result = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="compress_test.mp4",
+            content_type="video/mp4"
         )
         
-        media_service.db.query = Mock(return_value=Mock(
-            filter=Mock(return_value=Mock(first=Mock(return_value=mock_file)))
-        ))
+        # Get compressed version
+        compressed = await media_service.get_compressed_media(
+            upload_result.file_id,
+            compression_level="medium"
+        )
         
-        with patch.object(media_service.file_handler, 'extract_video_frames', return_value=[]):
-            result = await media_service.process_media_for_ai(
-                file_id,
+        assert compressed is not None
+        assert isinstance(compressed, bytes)
+        
+        # Verify cache was called
+        media_service.cache.set.assert_called()
+    
+    @pytest.mark.asyncio
+    async def test_compress_media_from_cache(self, media_service, mock_cache):
+        """Test compressed media retrieved from cache."""
+        file_id = uuid4()
+        cached_data = b"cached-compressed-data"
+        
+        # Set up cache to return data
+        mock_cache.get = AsyncMock(return_value=cached_data)
+        
+        result = await media_service.get_compressed_media(file_id, "medium")
+        
+        # Should return cached data without processing
+        assert result == cached_data
+        mock_cache.get.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_compress_different_levels(self, media_service, test_db, sample_video_bytes):
+        """Test different compression levels."""
+        upload_result = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="compress_levels.mp4",
+            content_type="video/mp4"
+        )
+        
+        for level in ["low", "medium", "high"]:
+            compressed = await media_service.get_compressed_media(
+                upload_result.file_id,
+                compression_level=level
+            )
+            assert compressed is not None
+
+
+class TestMediaProcessing:
+    """Test media processing for AI analysis."""
+    
+    @pytest.mark.asyncio
+    async def test_process_for_gesture_recognition(self, media_service, test_db, sample_video_bytes):
+        """Test processing video for gesture recognition."""
+        # Upload video
+        upload_result = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="gesture_test.mp4",
+            content_type="video/mp4"
+        )
+        
+        # Process for gesture recognition
+        result = await media_service.process_media_for_ai(
+            upload_result.file_id,
+            processing_type="gesture_recognition"
+        )
+        
+        assert result["file_id"] == upload_result.file_id
+        assert result["processing_type"] == "gesture_recognition"
+        assert result["status"] == "ready_for_inference"
+        assert "frames_extracted" in result
+    
+    @pytest.mark.asyncio
+    async def test_process_for_audio_extraction(self, media_service, test_db, sample_video_bytes):
+        """Test extracting audio from video."""
+        upload_result = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="audio_test.mp4",
+            content_type="video/mp4"
+        )
+        
+        result = await media_service.process_media_for_ai(
+            upload_result.file_id,
+            processing_type="audio_extraction"
+        )
+        
+        assert result["processing_type"] == "audio_extraction"
+    
+    @pytest.mark.asyncio
+    async def test_process_nonexistent_file(self, media_service):
+        """Test processing non-existent file raises error."""
+        with pytest.raises(ValueError, match="not found"):
+            await media_service.process_media_for_ai(
+                uuid4(),
                 processing_type="gesture_recognition"
             )
-            
-            assert result["processing_type"] == "gesture_recognition"
-            assert "frames_extracted" in result
+
+
+class TestMediaDeletion:
+    """Test media file deletion."""
     
     @pytest.mark.asyncio
-    async def test_delete_media(self, media_service):
-        """Test deleting media file."""
-        file_id = uuid4()
+    async def test_delete_media_success(self, media_service, test_db, sample_video_bytes):
+        """Test successful media deletion."""
         user_id = uuid4()
         
-        mock_file = Mock(
-            id=file_id,
-            user_id=user_id,
-            file_path="uploads/video.mp4",
-            thumbnail_url=None
+        # Upload file
+        upload_result = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="delete_test.mp4",
+            content_type="video/mp4",
+            user_id=user_id
         )
         
-        media_service.db.query = Mock(return_value=Mock(
-            filter=Mock(return_value=Mock(first=Mock(return_value=mock_file)))
-        ))
+        # Delete file
+        success = await media_service.delete_media(upload_result.file_id, user_id)
         
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('pathlib.Path.unlink'):
-                with patch.object(media_service.cache, 'delete', return_value=True):
-                    result = await media_service.delete_media(file_id, user_id)
-                    
-                    assert result is True
+        assert success is True
+        
+        # Verify file is deleted from database
+        media_file = test_db.query(MediaFile).filter(
+            MediaFile.id == upload_result.file_id
+        ).first()
+        assert media_file is None
     
     @pytest.mark.asyncio
-    async def test_validate_file_valid(self, media_service, sample_video_bytes):
-        """Test file validation with valid file."""
-        filename = "test.mp4"
-        content_type = "video/mp4"
+    async def test_delete_media_wrong_user(self, media_service, test_db, sample_video_bytes):
+        """Test deletion fails for wrong user."""
+        user_id = uuid4()
+        other_user_id = uuid4()
         
-        # Should not raise exception
-        await media_service._validate_file(sample_video_bytes, filename, content_type)
+        # Upload file
+        upload_result = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="delete_test.mp4",
+            content_type="video/mp4",
+            user_id=user_id
+        )
+        
+        # Try to delete with different user
+        success = await media_service.delete_media(upload_result.file_id, other_user_id)
+        
+        assert success is False
     
     @pytest.mark.asyncio
-    async def test_validate_file_size_exceeded(self, media_service):
-        """Test file validation with oversized file."""
-        large_file = b"x" * (media_service.max_file_size + 1)
-        filename = "large.mp4"
-        content_type = "video/mp4"
+    async def test_delete_clears_cache(self, media_service, test_db, sample_video_bytes):
+        """Test deletion clears cached compressed versions."""
+        user_id = uuid4()
         
-        with pytest.raises(ValueError, match="File size exceeds"):
-            await media_service._validate_file(large_file, filename, content_type)
+        upload_result = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="cache_delete.mp4",
+            content_type="video/mp4",
+            user_id=user_id
+        )
+        
+        await media_service.delete_media(upload_result.file_id, user_id)
+        
+        # Verify cache delete was called
+        media_service.cache.delete.assert_called()
+
+
+class TestMediaInfo:
+    """Test media information retrieval."""
     
     @pytest.mark.asyncio
-    async def test_validate_file_invalid_type(self, media_service, sample_video_bytes):
-        """Test file validation with invalid file type."""
-        filename = "test.exe"
-        content_type = "application/x-msdownload"
+    async def test_get_media_info(self, media_service, test_db, sample_video_bytes):
+        """Test getting media file information."""
+        upload_result = await media_service.upload_media(
+            file_data=sample_video_bytes,
+            filename="info_test.mp4",
+            content_type="video/mp4"
+        )
         
-        with pytest.raises(ValueError, match="File type"):
-            await media_service._validate_file(sample_video_bytes, filename, content_type)
+        info = await media_service.get_media_info(upload_result.file_id)
+        
+        assert info is not None
+        assert info["file_id"] == upload_result.file_id
+        assert info["filename"] == "info_test.mp4"
+        assert info["content_type"] == "video/mp4"
+        assert info["file_size"] == len(sample_video_bytes)
+        assert "uploaded_at" in info
     
-    def test_calculate_file_hash(self, media_service, sample_video_bytes):
-        """Test file hash calculation."""
-        hash1 = media_service._calculate_file_hash(sample_video_bytes)
-        hash2 = media_service._calculate_file_hash(sample_video_bytes)
-        
-        assert hash1 == hash2  # Same data should produce same hash
-        assert len(hash1) == 64  # SHA-256 produces 64 character hex string
+    @pytest.mark.asyncio
+    async def test_get_media_info_not_found(self, media_service):
+        """Test getting info for non-existent media."""
+        info = await media_service.get_media_info(uuid4())
+        assert info is None

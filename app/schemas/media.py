@@ -237,3 +237,23 @@ class MediaStatistics(BaseModel):
     total_storage_bytes: int
     most_used_tags: List[Dict[str, Any]]
     recent_uploads: List[MediaResponse]
+
+
+class MediaUploadResponse(BaseModel):
+    """Schema for media upload response."""
+    file_id: UUID
+    filename: str
+    file_url: str
+    thumbnail_url: Optional[str]
+    file_size: int
+    content_type: str
+    message: str = "File uploaded successfully"
+
+
+class VideoStreamResponse(BaseModel):
+    """Schema for video streaming response."""
+    file_id: UUID
+    file_path: str
+    content_type: str
+    file_size: int
+    quality: str
