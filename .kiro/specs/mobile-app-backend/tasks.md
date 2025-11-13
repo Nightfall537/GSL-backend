@@ -44,14 +44,18 @@
     -   Implement search and filtering capabilities for dictionary content
     -   _Requirements: 3.3, 4.1, 4.2_
 
+    <!-- TODO: -->
+
 -   [ ] 2.3 Write unit tests for data models and authentication
 
-    -   Test user model validation and password hashing
-    -   Test JWT token generation and validation
-    -   Test database operations and relationships
-    -   _Requirements: 1.1, 1.2, 1.3_
+        -   Test user model validation and password hashing
+        -   Test JWT token generation and validation
+        -   Test database operations and relationships
+        -   _Requirements: 1.1, 1.2, 1.3_
 
--   [ ] 3. Create User Service with profile and progress management
+    <!-- END TODO: -->
+
+-   [-] 3. Create User Service with profile and progress management
 
     -   Implement user registration, login, and profile management endpoints
     -   Create learning progress tracking and analytics
@@ -59,7 +63,7 @@
     -   Implement role-based access control for different user types
     -   _Requirements: 1.1, 1.2, 1.3, 1.4_
 
--   [ ] 3.1 Implement learning progress and achievement system
+-   [x] 3.1 Implement learning progress and achievement system
 
     -   Create progress tracking for lessons and practice sessions
     -   Implement gamified achievement and badge system

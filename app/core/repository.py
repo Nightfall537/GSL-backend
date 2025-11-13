@@ -237,3 +237,28 @@ class BaseRepository(Generic[ModelType]):
         return self.db.query(self.model).filter(
             getattr(self.model, field_name) == field_value
         ).offset(skip).limit(limit).all()
+    
+    def get_all(self, skip: int = 0, limit: int = 1000) -> List[ModelType]:
+        """
+        Get all records with pagination.
+        
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of all model instances
+        """
+        return self.db.query(self.model).offset(skip).limit(limit).all()
+    
+    def get_multi_by_ids(self, ids: List[UUID]) -> List[ModelType]:
+        """
+        Get multiple records by list of IDs.
+        
+        Args:
+            ids: List of record IDs
+            
+        Returns:
+            List of model instances
+        """
+        return self.db.query(self.model).filter(self.model.id.in_(ids)).all()
