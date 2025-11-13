@@ -6,6 +6,7 @@ SQLAlchemy models for lessons, achievements, and practice sessions.
 
 from sqlalchemy import Column, String, Integer, Text, DateTime, Float, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
+from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
 
@@ -86,3 +87,7 @@ class PracticeSession(Base):
     
     # Timestamps
     completed_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = relationship("User", back_populates="practice_sessions")
+    lesson = relationship("Lesson")

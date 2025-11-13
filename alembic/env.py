@@ -13,6 +13,9 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from app.core.database import Base
 from app.config.settings import get_settings
 
+# Import all models to ensure they are registered with Base.metadata
+from app.db_models import User, LearningProgress, GSLSign, SignCategory, Lesson, Achievement, PracticeSession
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
